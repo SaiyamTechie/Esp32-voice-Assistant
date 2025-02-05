@@ -1,0 +1,133 @@
+/*(-----------------------------------------ESP32 Voice Recorder - Connections-------------------------------------------------------)
+
+         *MAX9814 Microphone Module (Analog Mode)
+          
+          VCC → ESP32 3.3V (Do NOT use 5V)
+          
+          GND → ESP32 GND
+          
+          OUT → ESP32 GPIO34 (Analog input for audio data)
+
+
+         *SD Card Module (SPI Connection)
+          
+          VCC → ESP32 3.3V
+          
+          GND → ESP32 GND
+          
+          MISO → ESP32 GPIO19
+          
+          MOSI → ESP32 GPIO23
+          
+          SCK → ESP32 GPIO18
+          
+          CS → ESP32 GPIO5
+
+
+         *Push Button (For Start/Stop Recording)
+          
+          One side → ESP32 GND
+          
+          Other side → ESP32 GPIO4 (Configured as INPUT_PULLUP)
+-----------------------------------------------------------------------------------------------------------------------------*/
+
+#include <Arduino.h>
+#include <SD.h>
+#include <SPI.h>
+
+#define MIC_PIN 34        // Analog pin for MAX9814 output
+#define BUTTON_PIN 4      // Button pin
+#define SD_CS 5           // SD card chip select pin
+
+const uint32_t SAMPLE_RATE = 16000;  // Sample rate (Hz)
+const uint16_t BITS_PER_SAMPLE = 16; // 16-bit PCM audio
+
+File audioFile;
+bool recording = false;
+unsigned long startTime = 0;
+
+void writeWAVHeader(File &file, uint32_t dataSize) {
+    file.seek(0);
+    
+    // Writing WAV file header
+    file.write((uint8_t*)"RIFF", 4);              // RIFF header
+    uint32_t fileSize = dataSize + 36;
+    file.write((uint8_t*)&fileSize, 4);           // File size minus 8 bytes
+    file.write((uint8_t*)"WAVE", 4);              // WAVE header
+    file.write((uint8_t*)"fmt ", 4);              // Format chunk
+    uint32_t subChunk1Size = 16;
+    file.write((uint8_t*)&subChunk1Size, 4);      // Subchunk1Size (16 for PCM)
+    uint16_t audioFormat = 1;
+    file.write((uint8_t*)&audioFormat, 2);        // PCM format
+    uint16_t numChannels = 1;
+    file.write((uint8_t*)&numChannels, 2);        // Number of channels (1=Mono)
+    file.write((uint8_t*)&SAMPLE_RATE, 4);        // Sample rate (e.g., 16000 Hz)
+    uint32_t byteRate = SAMPLE_RATE * numChannels * (BITS_PER_SAMPLE / 8);
+    file.write((uint8_t*)&byteRate, 4);           // Byte rate
+    uint16_t blockAlign = numChannels * (BITS_PER_SAMPLE / 8);
+    file.write((uint8_t*)&blockAlign, 2);         // Block align
+    file.write((uint8_t*)&BITS_PER_SAMPLE, 2);    // Bits per sample
+    file.write((uint8_t*)"data", 4);              // Data subchunk
+    file.write((uint8_t*)&dataSize, 4);           // Data size
+}
+
+void startRecording() {
+    if (!SD.begin(SD_CS)) {
+        Serial.println("SD Card initialization failed!");
+        return;
+    }
+    
+    String fileName = "/recording.wav";
+    audioFile = SD.open(fileName, FILE_WRITE);
+    
+    if (!audioFile) {
+        Serial.println("Failed to open file for writing");
+        return;
+    }
+
+    Serial.println("Recording Started...");
+    recording = true;
+    startTime = millis();
+
+    // Reserve space for WAV header
+    for (int i = 0; i < 44; i++) {
+        audioFile.write(0);
+    }
+}
+
+void stopRecording() {
+    if (!recording) return;
+
+    recording = false;
+    unsigned long fileSize = audioFile.size() - 44;
+    
+    Serial.println("Recording Stopped!");
+    audioFile.seek(0);
+    writeWAVHeader(audioFile, fileSize);
+    audioFile.close();
+}
+
+void setup() {
+    Serial.begin(115200);
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
+    
+    if (!SD.begin(SD_CS)) {
+        Serial.println("SD Card initialization failed!");
+        return;
+    }
+}
+
+void loop() {
+    if (digitalRead(BUTTON_PIN) == LOW && !recording) {
+        startRecording();
+    }
+    
+    if (digitalRead(BUTTON_PIN) == HIGH && recording) {
+        stopRecording();
+    }
+    
+    if (recording) {
+        int sample = analogRead(MIC_PIN);
+        audioFile.write((uint8_t*)&sample, 2);
+    }
+}
