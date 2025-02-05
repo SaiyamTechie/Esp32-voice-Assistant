@@ -1,5 +1,4 @@
-
-ESP32 Voice Assistant 🎙
+## **ESP32 Voice Assistant 🎙
 
 Using MAX9814 Microphone & I2S Amplifier
 
